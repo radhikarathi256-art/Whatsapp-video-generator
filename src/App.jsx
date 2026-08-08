@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Play, Circle, Download, Upload, Sun, Moon, Volume2, VolumeX, UserPlus, Sparkles, Loader2, Plus, Trash2 } from "lucide-react";
+import { Play, Square, Circle, Download, Upload, Sun, Moon, Volume2, VolumeX, UserPlus, Sparkles, Loader2, Plus, Trash2 } from "lucide-react";
 
 const W = 1080, H = 1080;
 const HEADER = 168;
@@ -84,6 +84,7 @@ export default function App() {
   const [sound, setSound] = useState(true);
   const [busy, setBusy] = useState(false);
   const [speed, setSpeed] = useState(1);
+  const [mode, setMode] = useState(null);
   const [status, setStatus] = useState("Ready. Press Play to preview, or Record to export a video.");
   const [videoUrl, setVideoUrl] = useState(null);
   const [videoExt, setVideoExt] = useState("webm");
@@ -96,6 +97,8 @@ export default function App() {
   const themeRef = useRef("light");
   const soundRef = useRef(true);
   const speedRef = useRef(1);
+  const stopFnRef = useRef(null);
+  const firstRows = useRef(true);
   const busyRef = useRef(false);
   const timelineRef = useRef({ items: [], total: 4 });
   const drawFrameRef = useRef(() => {});
@@ -313,13 +316,26 @@ export default function App() {
       const spd = speedRef.current || 1;
       const a = ensureAudio();
       if (a) { a.master.gain.value = soundRef.current ? 0.9 : 0; const t0 = a.ctx.currentTime + 0.05; for (const it of timelineRef.current.items) if (it.kind === "bubble") blip(a, it.side, t0 + it.showT / spd); }
+      let stopped = false;
+      stopFnRef.current = () => { stopped = true; cancelAnimationFrame(rafRef.current); resolve("stopped"); };
       const start = performance.now();
-      const loop = () => { const e = ((performance.now() - start) / 1000) * spd; drawFrame(e); if (e < total) rafRef.current = requestAnimationFrame(loop); else { drawFrame(total); resolve(); } };
+      const loop = () => {
+        if (stopped) return;
+        const e = ((performance.now() - start) / 1000) * spd;
+        drawFrame(e);
+        if (e < total) rafRef.current = requestAnimationFrame(loop);
+        else { drawFrame(total); stopFnRef.current = null; resolve("done"); }
+      };
       loop();
     });
   }
 
-  async function handlePlay() { if (busy) return; ensureAudio(); setBusy(true); setStatus("Playing preview…"); await runAnimation(); setBusy(false); setStatus("Preview done. Record to export a video."); }
+  async function handlePlay() {
+    if (busy) return; ensureAudio(); setBusy(true); setMode("play"); setStatus("Playing preview…");
+    const r = await runAnimation();
+    setBusy(false); setMode(null);
+    setStatus(r === "stopped" ? "Stopped." : "Preview done. Record to export a video.");
+  }
 
   async function handleRecord() {
     if (busy) return;
@@ -338,8 +354,12 @@ export default function App() {
     let rec; try { rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 12_000_000 }); } catch { rec = new MediaRecorder(stream); }
     recRef.current = rec; chunksRef.current = [];
     rec.ondataavailable = (ev) => { if (ev.data.size) chunksRef.current.push(ev.data); };
-    rec.onstop = () => { const blob = new Blob(chunksRef.current, { type: mime }); setVideoUrl(URL.createObjectURL(blob)); setVideoExt(ext); setBusy(false); setStatus(ext === "mp4" ? "Video ready — download below." : "Video ready (.webm). Download below; convert to MP4 if a platform needs it."); };
-    setBusy(true); setStatus("Recording…"); rec.start(); await runAnimation(); setTimeout(() => { if (rec.state !== "inactive") rec.stop(); }, 150);
+    rec.onstop = () => { const blob = new Blob(chunksRef.current, { type: mime }); setVideoUrl(URL.createObjectURL(blob)); setVideoExt(ext); setBusy(false); setMode(null); setStatus(ext === "mp4" ? "Video ready — download below." : "Video ready (.webm). Download below; convert to MP4 if a platform needs it."); };
+    setBusy(true); setMode("record"); setStatus("Recording…"); rec.start(); await runAnimation(); setTimeout(() => { if (rec.state !== "inactive") rec.stop(); }, 150);
+  }
+
+  function handleStop() {
+    if (stopFnRef.current) stopFnRef.current();
   }
 
   async function generate() {
@@ -360,11 +380,13 @@ export default function App() {
     } catch (e) { setStatus("Generation failed (" + e.message + "). Browsers can block direct API calls; if so, build the chat manually below."); }
     setGenerating(false);
   }
-  function applyRows() {
+  useEffect(() => {
+    if (firstRows.current) { firstRows.current = false; return; }
+    if (busyRef.current) return;
     const sc = rowsToScript(rows);
-    if (!sc.messages.length) { setStatus("Add at least one message."); return; }
-    setScript(sc); setStatus("Chat applied. Open the Export tab, then Play or Record.");
-  }
+    if (sc.messages.length) setScript(sc);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows]);
   function addRow(sender) { setRows((r) => [...r, { sender, text: "" }]); }
   function updateRow(i, patch) { setRows((r) => r.map((x, j) => j === i ? { ...x, ...patch } : x)); }
   function removeRow(i) { setRows((r) => r.filter((_, j) => j !== i)); }
@@ -454,7 +476,7 @@ export default function App() {
                         <option value="astro">Astrologer</option>
                         <option value="divider">— Divider</option>
                       </select>
-                      <input value={r.text} onChange={(e) => updateRow(i, { text: e.target.value })}
+                      <input key={i} type="text" value={r.text || ""} onChange={(e) => updateRow(i, { text: e.target.value })}
                         placeholder={r.sender === "divider" ? "4 months later" : (r.sender === "astro" ? "Astrologer message…" : "User message…")}
                         style={{ ...inputStyle, flex: 1 }} />
                       <button onClick={() => removeRow(i)} title="Remove" style={{ border: "1px solid #E1DDD4", background: "#fff", borderRadius: 8, padding: "8px 9px", cursor: "pointer", flexShrink: 0, display: "flex" }}><Trash2 size={14} /></button>
@@ -465,7 +487,7 @@ export default function App() {
                   <button onClick={() => addRow("user")} style={btn("#fff", "#1B1A17", "1px solid #E1DDD4")}><Plus size={15} /> User</button>
                   <button onClick={() => addRow("astro")} style={btn("#fff", "#1B1A17", "1px solid #E1DDD4")}><Plus size={15} /> Astrologer</button>
                 </div>
-                <button onClick={applyRows} style={{ ...btn(ACCENT, "#fff"), marginTop: 8 }}>Apply chat</button>
+                <div style={{ fontSize: 12, color: "#8a857c", marginTop: 10, lineHeight: 1.45 }}>The preview updates live as you type. Add or remove rows with the buttons above.</div>
               </div>
             )}
 
@@ -530,8 +552,14 @@ export default function App() {
                 </div>
               </div>
               <div style={{ display: "flex", gap: 8 }}>
-                <button onClick={handlePlay} disabled={busy} style={btn("#fff", "#1B1A17", "1px solid #E1DDD4")}><Play size={15} /> Play</button>
-                <button onClick={handleRecord} disabled={busy} style={btn("#C0392B", "#fff")}><Circle size={13} fill="#fff" /> Record</button>
+                <button onClick={mode === "play" ? handleStop : handlePlay} disabled={busy && mode !== "play"}
+                  style={btn(mode === "play" ? "#666" : "#fff", mode === "play" ? "#fff" : "#1B1A17", mode === "play" ? "none" : "1px solid #E1DDD4")}>
+                  {mode === "play" ? <><Square size={13} fill="#fff" /> Stop</> : <><Play size={15} /> Play</>}
+                </button>
+                <button onClick={mode === "record" ? handleStop : handleRecord} disabled={busy && mode !== "record"}
+                  style={btn(mode === "record" ? "#666" : "#C0392B", "#fff")}>
+                  {mode === "record" ? <><Square size={13} fill="#fff" /> Stop</> : <><Circle size={13} fill="#fff" /> Record</>}
+                </button>
               </div>
               {videoUrl && (<a href={videoUrl} download={`astrochat-reel-${Date.now()}.${videoExt}`} style={{ ...btn(ACCENT, "#fff"), textDecoration: "none", marginTop: 8 }}><Download size={15} /> Download .{videoExt}</a>)}
               <div style={{ fontSize: 12.5, color: "#6b675f", marginTop: 12, lineHeight: 1.5 }}>{status}</div>
