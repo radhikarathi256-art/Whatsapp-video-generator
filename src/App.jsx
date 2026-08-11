@@ -210,9 +210,12 @@ export default function App() {
       const h = BUB_PADTOP + lines.length * LINE_H + META_H + BUB_PADBOT;
       const typing = side === "in" && m.typing !== false;
       let typingStart = null; if (typing) { typingStart = t; t += 1.1; }
+      // 9:16 shows the outgoing message being typed into the input bar first
+      let composeStart = null;
+      if (side === "out" && ratioRef.current === "9:16") { composeStart = t; t += 0.9 + Math.min(1.6, m.text.length * 0.035); }
       const showT = t; t += side === "in" ? 1.15 : 0.95;
       baseMin += 2 + Math.floor(Math.random() * 3);
-      items.push({ kind: "bubble", side, lines, w, h, time, showT, typingStart });
+      items.push({ kind: "bubble", side, lines, w, h, time, showT, typingStart, composeStart, text: m.text });
     }
     timelineRef.current = { items, total: t + 1.4 };
     scrollRef.current = 0;
@@ -339,7 +342,7 @@ export default function App() {
     ["a", "s", "d", "f", "g", "h", "j", "k", "l"],
     ["⇧", "z", "x", "c", "v", "b", "n", "m", "⌫"],
   ];
-  function drawInputBar(ctx, T, top) {
+  function drawInputBar(ctx, T, top, typed) {
     ctx.fillStyle = T.kbBar; ctx.fillRect(0, top, W, INPUT_H);
     const pad = 22, btn = 100, cy = top + INPUT_H / 2;
     const fw = W - pad * 2 - btn - 18, fh = 100, fx = pad, fy = cy - fh / 2;
@@ -352,25 +355,39 @@ export default function App() {
     ctx.beginPath(); ctx.arc(ex - 9, cy - 8, 4, 0, Math.PI * 2); ctx.fill();
     ctx.beginPath(); ctx.arc(ex + 9, cy - 8, 4, 0, Math.PI * 2); ctx.fill();
     ctx.beginPath(); ctx.arc(ex, cy + 2, 13, 0.25 * Math.PI, 0.75 * Math.PI); ctx.stroke();
-    ctx.font = FONT_MSG; ctx.fillStyle = T.kbPlaceholder; ctx.textAlign = "left"; ctx.textBaseline = "middle";
-    ctx.fillText("Message", ex + 44, cy + 1);
-    // attach + camera
-    ctx.strokeStyle = T.kbPlaceholder; ctx.lineWidth = 5; ctx.lineCap = "round";
-    const ax = fx + fw - 130;
-    ctx.beginPath(); ctx.moveTo(ax + 16, cy - 8); ctx.lineTo(ax - 6, cy + 14); ctx.stroke();
-    ctx.beginPath(); ctx.arc(ax + 4, cy, 22, Math.PI * 0.75, Math.PI * 1.9); ctx.stroke();
-    const cx2 = fx + fw - 58;
-    ctx.lineWidth = 4;
+    // camera
+    const cx2 = fx + fw - 62;
+    ctx.strokeStyle = T.kbPlaceholder; ctx.lineWidth = 4; ctx.lineCap = "round"; ctx.lineJoin = "round";
     roundRect(ctx, cx2 - 26, cy - 16, 52, 36, 8); ctx.stroke();
     ctx.beginPath(); ctx.arc(cx2, cy + 2, 11, 0, Math.PI * 2); ctx.stroke();
+    // text / placeholder (clipped to the space between emoji and camera)
+    const tx = ex + 44, tMaxW = cx2 - 34 - tx;
+    ctx.save(); ctx.beginPath(); ctx.rect(tx, fy, tMaxW, fh); ctx.clip();
+    ctx.font = FONT_MSG; ctx.textAlign = "left"; ctx.textBaseline = "middle";
+    if (typed) {
+      ctx.fillStyle = T.inText;
+      let s = typed;
+      while (s.length > 1 && ctx.measureText(s).width > tMaxW) s = s.slice(1); // keep the tail visible
+      const tw = ctx.measureText(s).width;
+      ctx.fillText(s, tx, cy + 1);
+      ctx.fillStyle = T.kbSend; ctx.fillRect(tx + tw + 5, cy - 24, 4, 48); // caret
+    } else {
+      ctx.fillStyle = T.kbPlaceholder; ctx.fillText("Message", tx, cy + 1);
+    }
+    ctx.restore();
     // send / mic button
     const bx = W - pad - btn / 2;
     ctx.fillStyle = T.kbSend; ctx.beginPath(); ctx.arc(bx, cy, btn / 2, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = T.kbSendIcon;
-    roundRect(ctx, bx - 11, cy - 30, 22, 36, 11); ctx.fill();
-    ctx.strokeStyle = T.kbSendIcon; ctx.lineWidth = 5;
-    ctx.beginPath(); ctx.arc(bx, cy - 6, 21, 0, Math.PI); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(bx, cy + 15); ctx.lineTo(bx, cy + 28); ctx.stroke();
+    ctx.fillStyle = T.kbSendIcon; ctx.strokeStyle = T.kbSendIcon; ctx.lineWidth = 5;
+    if (typed) {
+      ctx.beginPath();
+      ctx.moveTo(bx - 24, cy - 22); ctx.lineTo(bx + 26, cy); ctx.lineTo(bx - 24, cy + 22);
+      ctx.lineTo(bx - 14, cy); ctx.closePath(); ctx.fill();
+    } else {
+      roundRect(ctx, bx - 11, cy - 30, 22, 36, 11); ctx.fill();
+      ctx.beginPath(); ctx.arc(bx, cy - 6, 21, 0, Math.PI); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(bx, cy + 15); ctx.lineTo(bx, cy + 28); ctx.stroke();
+    }
   }
   function drawKeyboard(ctx, T, top) {
     ctx.fillStyle = T.kbBg; ctx.fillRect(0, top, W, KB_H);
@@ -438,7 +455,16 @@ export default function App() {
     const g = ctx.createLinearGradient(0, HEADER, 0, HEADER + 26);
     g.addColorStop(0, T.elev); g.addColorStop(1, "rgba(0,0,0,0)");
     ctx.fillStyle = g; ctx.fillRect(0, HEADER, W, 26);
-    if (BOTTOM > 0) { drawInputBar(ctx, T, H - BOTTOM); drawKeyboard(ctx, T, H - KB_H); }
+    if (BOTTOM > 0) {
+      let typed = "";
+      for (const it of items) {
+        if (it.composeStart != null && e >= it.composeStart && e < it.showT) {
+          const p = clamp((e - it.composeStart) / (it.showT - it.composeStart) * 1.15, 0, 1);
+          typed = it.text.slice(0, Math.max(1, Math.round(it.text.length * p)));
+        }
+      }
+      drawInputBar(ctx, T, H - BOTTOM, typed); drawKeyboard(ctx, T, H - KB_H);
+    }
   }
   drawFrameRef.current = drawFrame;
   useEffect(() => { drawFrame(timelineRef.current.total + 5); }, []);
