@@ -14,7 +14,9 @@ let MAXBUB = 0.80 * W, MAXTXT = MAXBUB - 2 * BUB_PADX;
 const GAP = 18, SIDE = 26, TOPPAD = 26, BOTPAD = 30;
 const TAIL_W = 14, TAIL_H = 20;
 const RATIOS = { "1:1": [1080, 1080], "9:16": [1080, 1920], "16:9": [1920, 1080] };
-function setDims(r) { const d = RATIOS[r] || RATIOS["1:1"]; W = d[0]; H = d[1]; MAXBUB = Math.min(0.80 * W, 900); MAXTXT = MAXBUB - 2 * BUB_PADX; }
+let BOTTOM = 0; // height of input bar + keyboard (9:16 only)
+const INPUT_H = 150, KB_H = 650;
+function setDims(r) { const d = RATIOS[r] || RATIOS["1:1"]; W = d[0]; H = d[1]; MAXBUB = Math.min(0.80 * W, 900); MAXTXT = MAXBUB - 2 * BUB_PADX; BOTTOM = r === "9:16" ? INPUT_H + KB_H : 0; }
 
 const MUSIC_BEDS = [
   { id: "calm", name: "Calm Pad", wave: "sine", root: 220, scale: [0, 3, 7, 10], pat: "pad", tempo: 0 },
@@ -60,11 +62,15 @@ const THEMES = {
   light: { bg: "#EAE3D8", header: "#F6F2EC", name: "#111", status: "#667781",
     out: "#DCF4C6", outText: "#0e1f12", in: "#FFFFFF", inText: "#141414", inBorder: "rgba(0,0,0,0.05)",
     metaOut: "#6f8a5f", metaIn: "#8a8f8a", tick: "#4aa8e0", div: "#F3EFE8", divText: "#6b6b6b",
-    icon: "#1f1f1f", pattern: "rgba(150,131,102,0.10)", elev: "rgba(0,0,0,0.10)" },
+    icon: "#1f1f1f", pattern: "rgba(150,131,102,0.10)", elev: "rgba(0,0,0,0.10)",
+    kbBg: "#D1D5DB", kbKey: "#FFFFFF", kbKeyAlt: "#AEB4BD", kbText: "#111", kbBar: "#F6F2EC",
+    kbField: "#FFFFFF", kbPlaceholder: "#8a8f8a", kbSend: "#25D366", kbSendIcon: "#FFFFFF" },
   dark: { bg: "#0B141A", header: "#1F2C33", name: "#E9EDEF", status: "#8696A0",
     out: "#144D37", outText: "#eafff2", in: "#1F2C33", inText: "#E9EDEF", inBorder: "rgba(255,255,255,0.04)",
     metaOut: "#a9d9b8", metaIn: "#8696A0", tick: "#53BDEB", div: "#1C282F", divText: "#8696A0",
-    icon: "#e9edef", pattern: "rgba(190,205,212,0.06)", elev: "rgba(0,0,0,0.4)" },
+    icon: "#e9edef", pattern: "rgba(190,205,212,0.06)", elev: "rgba(0,0,0,0.4)",
+    kbBg: "#0E1418", kbKey: "#2A3942", kbKeyAlt: "#182229", kbText: "#E9EDEF", kbBar: "#1F2C33",
+    kbField: "#2A3942", kbPlaceholder: "#8696A0", kbSend: "#00A884", kbSendIcon: "#0B141A" },
 };
 
 // ---- baked astrologer photos (face-cropped, export-safe data URIs) ----
@@ -321,6 +327,89 @@ export default function App() {
     ctx.font = FONT_DIV; ctx.fillStyle = T.divText; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(el.text, W / 2, y + h / 2 + 1);
     ctx.restore();
   }
+  function roundRect(ctx, x, y, w, h, r) {
+    const rr = Math.min(r, w / 2, h / 2); ctx.beginPath();
+    ctx.moveTo(x + rr, y); ctx.lineTo(x + w - rr, y); ctx.arcTo(x + w, y, x + w, y + rr, rr);
+    ctx.lineTo(x + w, y + h - rr); ctx.arcTo(x + w, y + h, x + w - rr, y + h, rr);
+    ctx.lineTo(x + rr, y + h); ctx.arcTo(x, y + h, x, y + h - rr, rr);
+    ctx.lineTo(x, y + rr); ctx.arcTo(x, y, x + rr, y, rr); ctx.closePath();
+  }
+  const KB_ROWS = [
+    ["q", "w", "e", "r", "t", "y", "u", "i", "o", "p"],
+    ["a", "s", "d", "f", "g", "h", "j", "k", "l"],
+    ["⇧", "z", "x", "c", "v", "b", "n", "m", "⌫"],
+  ];
+  function drawInputBar(ctx, T, top) {
+    ctx.fillStyle = T.kbBar; ctx.fillRect(0, top, W, INPUT_H);
+    const pad = 22, btn = 100, cy = top + INPUT_H / 2;
+    const fw = W - pad * 2 - btn - 18, fh = 100, fx = pad, fy = cy - fh / 2;
+    ctx.fillStyle = T.kbField; roundRect(ctx, fx, fy, fw, fh, fh / 2); ctx.fill();
+    if (T.inBorder) { ctx.strokeStyle = T.inBorder; ctx.lineWidth = 1; ctx.stroke(); }
+    // emoji glyph
+    ctx.fillStyle = T.kbPlaceholder; ctx.lineWidth = 4; ctx.strokeStyle = T.kbPlaceholder;
+    const ex = fx + 54;
+    ctx.beginPath(); ctx.arc(ex, cy, 24, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath(); ctx.arc(ex - 9, cy - 8, 4, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(ex + 9, cy - 8, 4, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(ex, cy + 2, 13, 0.25 * Math.PI, 0.75 * Math.PI); ctx.stroke();
+    ctx.font = FONT_MSG; ctx.fillStyle = T.kbPlaceholder; ctx.textAlign = "left"; ctx.textBaseline = "middle";
+    ctx.fillText("Message", ex + 44, cy + 1);
+    // attach + camera
+    ctx.strokeStyle = T.kbPlaceholder; ctx.lineWidth = 5; ctx.lineCap = "round";
+    const ax = fx + fw - 130;
+    ctx.beginPath(); ctx.moveTo(ax + 16, cy - 8); ctx.lineTo(ax - 6, cy + 14); ctx.stroke();
+    ctx.beginPath(); ctx.arc(ax + 4, cy, 22, Math.PI * 0.75, Math.PI * 1.9); ctx.stroke();
+    const cx2 = fx + fw - 58;
+    ctx.lineWidth = 4;
+    roundRect(ctx, cx2 - 26, cy - 16, 52, 36, 8); ctx.stroke();
+    ctx.beginPath(); ctx.arc(cx2, cy + 2, 11, 0, Math.PI * 2); ctx.stroke();
+    // send / mic button
+    const bx = W - pad - btn / 2;
+    ctx.fillStyle = T.kbSend; ctx.beginPath(); ctx.arc(bx, cy, btn / 2, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = T.kbSendIcon;
+    roundRect(ctx, bx - 11, cy - 30, 22, 36, 11); ctx.fill();
+    ctx.strokeStyle = T.kbSendIcon; ctx.lineWidth = 5;
+    ctx.beginPath(); ctx.arc(bx, cy - 6, 21, 0, Math.PI); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(bx, cy + 15); ctx.lineTo(bx, cy + 28); ctx.stroke();
+  }
+  function drawKeyboard(ctx, T, top) {
+    ctx.fillStyle = T.kbBg; ctx.fillRect(0, top, W, KB_H);
+    const gap = 14, sidePad = 12, rowH = (KB_H - 52) / 4, r = 14;
+    const kw = (W - sidePad * 2 - gap * 9) / 10;
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    const key = (x, y, w, h, label, alt) => {
+      ctx.fillStyle = alt ? T.kbKeyAlt : T.kbKey;
+      roundRect(ctx, x, y, w, h, r); ctx.fill();
+      ctx.fillStyle = T.kbText; ctx.font = '500 46px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+      ctx.fillText(label, x + w / 2, y + h / 2 + 2);
+    };
+    let y = top + 26;
+    KB_ROWS.forEach((row, ri) => {
+      const h = rowH - 22;
+      if (ri === 2) {
+        const wide = kw * 1.5;
+        let x = sidePad;
+        key(x, y, wide, h, row[0], true); x += wide + gap;
+        for (let i = 1; i < row.length - 1; i++) { key(x, y, kw, h, row[i]); x += kw + gap; }
+        key(x, y, W - sidePad - x, h, row[row.length - 1], true);
+      } else {
+        const total = row.length * kw + (row.length - 1) * gap;
+        let x = (W - total) / 2;
+        for (const k of row) { key(x, y, kw, h, k); x += kw + gap; }
+      }
+      y += rowH;
+    });
+    // bottom row: ?123, comma, space, period, enter
+    const h = rowH - 22;
+    const smallW = kw * 1.5;
+    key(sidePad, y, smallW, h, "?123", true);
+    key(sidePad + smallW + gap, y, kw, h, ",");
+    const spaceX = sidePad + smallW + gap + kw + gap;
+    const enterW = kw * 1.5, commaX = W - sidePad - enterW - gap - kw;
+    key(spaceX, y, commaX - gap - spaceX, h, "");
+    key(commaX, y, kw, h, ".");
+    key(W - sidePad - enterW, y, enterW, h, "↵", true);
+  }
   const elHeight = (el) => el.kind === "bubble" ? el.h : el.kind === "typing" ? 74 : 42;
 
   function drawFrame(e) {
@@ -339,9 +428,9 @@ export default function App() {
       }
     }
     let y = HEADER + TOPPAD; for (const el of els) { el._y = y; y += elHeight(el) + GAP; }
-    const target = Math.max(0, y - (H - BOTPAD));
+    const target = Math.max(0, y - (H - BOTTOM - BOTPAD));
     scrollRef.current += (target - scrollRef.current) * 0.2; const sc = scrollRef.current;
-    ctx.save(); ctx.beginPath(); ctx.rect(0, HEADER, W, H - HEADER); ctx.clip();
+    ctx.save(); ctx.beginPath(); ctx.rect(0, HEADER, W, H - HEADER - BOTTOM); ctx.clip();
     for (const el of els) { const yt = el._y - sc; if (el.kind === "bubble") drawBubble(ctx, T, el, yt); else if (el.kind === "typing") drawTyping(ctx, T, yt, e); else drawDivider(ctx, T, el, yt); }
     ctx.restore();
     drawHeader(ctx, T);
@@ -349,6 +438,7 @@ export default function App() {
     const g = ctx.createLinearGradient(0, HEADER, 0, HEADER + 26);
     g.addColorStop(0, T.elev); g.addColorStop(1, "rgba(0,0,0,0)");
     ctx.fillStyle = g; ctx.fillRect(0, HEADER, W, 26);
+    if (BOTTOM > 0) { drawInputBar(ctx, T, H - BOTTOM); drawKeyboard(ctx, T, H - KB_H); }
   }
   drawFrameRef.current = drawFrame;
   useEffect(() => { drawFrame(timelineRef.current.total + 5); }, []);
